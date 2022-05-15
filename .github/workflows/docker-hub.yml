@@ -1,0 +1,90 @@
+name: Node npm test
+
+on:
+  schedule:
+    - cron: '48 19 * * 6'
+
+  workflow_dispatch:
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+
+    outputs:
+      clasp_versions: ${{ steps.clasp-versions.outputs.clasp_versions }}
+      clasp_latest: ${{ steps.clasp-versions.outputs.clasp_latest }}
+
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Check clasp versions
+        id: clasp-versions
+        run: |
+          versions=$(npm view @google/clasp versions | tr -d '\n')
+          latest=$(npm view @google/clasp version)
+          echo "::set-output name=clasp_versions::$versions"
+          echo "::set-output name=clasp_latest::$latest"
+
+  build_push:
+    runs-on: ubuntu-latest
+
+    needs:
+      - npm
+
+    strategy:
+      matrix:
+        clasp_version: ${{ fromJSON(needs.npm.outputs.clasp_versions) }}
+
+    steps:
+      - name: Set tags
+        id: tags
+        run: |
+          version="${{ matrix.clasp_version }}"
+          latest="${{ needs.npm.outputs.clasp_latest }}"
+          tag="${{ secrets.DOCKERHUB_USERNAME }}/clasp:$version"
+          if [ "$version" = "$latest" ]; then
+            tag="$tag,${{ secrets.DOCKERHUB_USERNAME }}/clasp:latest"
+          fi
+          echo "::set-output name=tags::$tag"
+
+      - name: Check out the repo
+        uses: actions/checkout@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Cache Docker layers
+        uses: actions/cache@v2
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v1 
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v2
+        with:
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            CLASP_VERSION=${{ matrix.clasp_version }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
