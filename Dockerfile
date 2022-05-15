@@ -1,8 +1,9 @@
-FROM node:12
+FROM node:lts
 
+ARG CLASP_VERSION
 ENV LANG C.UTF-8
 
-RUN npm install @google/clasp -g && \
+RUN npm install -g @google/clasp@${CLASP_VERSION}; \
     mkdir /opt/src
 
 WORKDIR /opt/src
