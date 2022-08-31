@@ -1,4 +1,4 @@
-FROM node:lts
+FROM node:lts-alpine
 
 ARG CLASP_VERSION
 ENV LANG C.UTF-8
